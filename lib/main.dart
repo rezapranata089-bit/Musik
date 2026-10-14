@@ -46,6 +46,7 @@ class PlayerController extends ChangeNotifier {
   List<Track> queue = kTracks;
   int index = -1;
   bool playing = false;
+  String? error;
 
   Track? get current => index >= 0 ? queue[index] : null;
 
@@ -60,19 +61,45 @@ class PlayerController extends ChangeNotifier {
   Future<void> playAt(int i, [List<Track>? newQueue]) async {
     if (newQueue != null) queue = newQueue;
     index = i;
+    error = null;
     notifyListeners();
     try {
       final t = current!;
       var url = t.url;
       if (t.videoId != null) {
-        final manifest = await _yt.videos.streamsClient.getManifest(t.videoId!);
-        url = manifest.audioOnly.withHighestBitrate().url.toString();
+        url = await _resolve(t.videoId!);
       }
+      if (index != i) return;
       await player.setUrl(url);
       player.play();
     } catch (e) {
       debugPrint('Gagal memutar: $e');
+      if (index != i) return;
+      final msg = e.toString().split('\n').first;
+      error = 'Gagal memutar: ${msg.length > 120 ? msg.substring(0, 120) : msg}';
+      notifyListeners();
     }
+  }
+
+  Future<String> _resolve(String id) async {
+    Object? lastError;
+    final clients = [yte.YoutubeApiClient.ios, yte.YoutubeApiClient.androidVr];
+    for (final c in clients) {
+      try {
+        final m = await _yt.videos.streamsClient.getManifest(id, ytClients: [c]);
+        final all = m.audioOnly.toList();
+        final mp4 =
+            all.where((s) => s.container == yte.StreamContainer.mp4).toList();
+        final pool = mp4.isNotEmpty ? mp4 : all;
+        if (pool.isEmpty) continue;
+        final best = pool.reduce((a, b) =>
+            a.bitrate.bitsPerSecond >= b.bitrate.bitsPerSecond ? a : b);
+        return best.url.toString();
+      } catch (e) {
+        lastError = e;
+      }
+    }
+    throw lastError ?? 'Stream audio tidak ditemukan';
   }
 
   void toggle() {
@@ -696,6 +723,15 @@ class _NowPlayingState extends State<NowPlaying> {
                           Text(t.artist,
                               style: const TextStyle(
                                   fontSize: 20, color: Colors.white70)),
+                          if (ctrl.error != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(ctrl.error!,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontSize: 13, color: Color(0xFFFF6B6B))),
+                            ),
                         ]),
                   ),
                   const SizedBox(height: 12),
