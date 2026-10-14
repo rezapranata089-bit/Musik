@@ -83,10 +83,14 @@ class PlayerController extends ChangeNotifier {
 
   Future<String> _resolve(String id) async {
     Object? lastError;
-    final clients = [yte.YoutubeApiClient.ios, yte.YoutubeApiClient.androidVr];
+    final clients = [
+      yte.YoutubeApiClient.ios,
+      yte.YoutubeApiClient.androidVr,
+      yte.YoutubeApiClient.tv,
+    ];
     for (final c in clients) {
       try {
-        final m = await _yt.videos.streamsClient.getManifest(id, ytClients: [c]);
+        final m = await _yt.videos.streams.getManifest(id, ytClients: [c]);
         final all = m.audioOnly.toList();
         final mp4 =
             all.where((s) => s.container == yte.StreamContainer.mp4).toList();
