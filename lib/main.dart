@@ -75,22 +75,24 @@ class PlayerController extends ChangeNotifier {
     } catch (e) {
       debugPrint('Gagal memutar: $e');
       if (index != i) return;
-      final msg = e.toString().split('\n').first;
-      error = 'Gagal memutar: ${msg.length > 120 ? msg.substring(0, 120) : msg}';
+      error = 'Gagal memutar:\n$e';
       notifyListeners();
     }
   }
 
   Future<String> _resolve(String id) async {
-    Object? lastError;
+    final errors = <String>[];
+    final names = ['ios', 'androidVr', 'tv'];
     final clients = [
       yte.YoutubeApiClient.ios,
       yte.YoutubeApiClient.androidVr,
       yte.YoutubeApiClient.tv,
     ];
-    for (final c in clients) {
+    for (var n = 0; n < clients.length; n++) {
+      final c = clients[n];
       try {
-        final m = await _yt.videos.streams.getManifest(id, ytClients: [c]);
+        final m = await _yt.videos.streams
+            .getManifest(id, ytClients: [c], requireWatchPage: false);
         final all = m.audioOnly.toList();
         final mp4 =
             all.where((s) => s.container == yte.StreamContainer.mp4).toList();
@@ -100,10 +102,12 @@ class PlayerController extends ChangeNotifier {
             a.bitrate.bitsPerSecond >= b.bitrate.bitsPerSecond ? a : b);
         return best.url.toString();
       } catch (e) {
-        lastError = e;
+        final s = e.toString();
+        final r = RegExp(r'Reason: (.*)').firstMatch(s)?.group(1);
+        errors.add('${names[n]}: ${r ?? s.split('\n').first}');
       }
     }
-    throw lastError ?? 'Stream audio tidak ditemukan';
+    throw errors.isEmpty ? 'Stream audio tidak ditemukan' : errors.join('\n');
   }
 
   void toggle() {
@@ -731,7 +735,7 @@ class _NowPlayingState extends State<NowPlaying> {
                             Padding(
                               padding: const EdgeInsets.only(top: 6),
                               child: Text(ctrl.error!,
-                                  maxLines: 2,
+                                  maxLines: 6,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                       fontSize: 13, color: Color(0xFFFF6B6B))),
