@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yte;
 
 const kAccent = Color(0xFFFA243C);
 
@@ -8,7 +9,9 @@ const kAccent = Color(0xFFFA243C);
 
 class Track {
   final String title, artist, album, art, url;
-  const Track(this.title, this.artist, this.album, this.art, this.url);
+  final String? videoId;
+  const Track(this.title, this.artist, this.album, this.art, this.url,
+      {this.videoId});
 }
 
 const _names = [
@@ -39,6 +42,7 @@ final List<Track> kTracks = List.generate(_names.length, (i) {
 
 class PlayerController extends ChangeNotifier {
   final AudioPlayer player = AudioPlayer();
+  final yte.YoutubeExplode _yt = yte.YoutubeExplode();
   List<Track> queue = kTracks;
   int index = -1;
   bool playing = false;
@@ -58,7 +62,13 @@ class PlayerController extends ChangeNotifier {
     index = i;
     notifyListeners();
     try {
-      await player.setUrl(current!.url);
+      final t = current!;
+      var url = t.url;
+      if (t.videoId != null) {
+        final manifest = await _yt.videos.streamsClient.getManifest(t.videoId!);
+        url = manifest.audioOnly.withHighestBitrate().url.toString();
+      }
+      await player.setUrl(url);
       player.play();
     } catch (e) {
       debugPrint('Gagal memutar: $e');
@@ -472,22 +482,69 @@ class SearchPage extends StatefulWidget {
 }
 
 class _SearchPageState extends State<SearchPage> {
-  String q = '';
+  final yte.YoutubeExplode yt = yte.YoutubeExplode();
+  List<Track> results = [];
+  bool loading = false;
+  bool searched = false;
+  String? error;
+
+  Future<void> search(String q) async {
+    q = q.trim();
+    if (q.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      loading = true;
+      searched = true;
+      error = null;
+    });
+    try {
+      final list = await yt.search.search(q);
+      results = list
+          .map((v) => Track(v.title, v.author, '', v.thumbnails.highResUrl, '',
+              videoId: v.id.value))
+          .toList();
+    } catch (e) {
+      debugPrint('Gagal mencari: $e');
+      results = [];
+      error = 'Gagal mencari. Periksa koneksi internet lalu coba lagi.';
+    }
+    if (mounted) setState(() => loading = false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    final results = kTracks
-        .where((t) =>
-            t.title.toLowerCase().contains(q.toLowerCase()) ||
-            t.artist.toLowerCase().contains(q.toLowerCase()))
-        .toList();
+    Widget body;
+    if (loading) {
+      body = const SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(child: CircularProgressIndicator(color: kAccent)));
+    } else if (error != null) {
+      body = SliverFillRemaining(
+          hasScrollBody: false, child: Center(child: Text(error!)));
+    } else if (!searched) {
+      body = const SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(child: Text('Ketik judul atau artis, lalu tekan cari.')));
+    } else if (results.isEmpty) {
+      body = const SliverFillRemaining(
+          hasScrollBody: false,
+          child: Center(child: Text('Tidak ada hasil. Coba kata kunci lain.')));
+    } else {
+      body = SliverList.builder(
+        itemCount: results.length,
+        itemBuilder: (_, i) =>
+            SongTile(results[i], onTap: () => ctrl.playAt(i, results)),
+      );
+    }
+
     return CustomScrollView(slivers: [
       const LargeTitle('Cari'),
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
           child: TextField(
-            onChanged: (v) => setState(() => q = v),
+            textInputAction: TextInputAction.search,
+            onSubmitted: search,
             decoration: InputDecoration(
               hintText: 'Artis, lagu, atau album',
               prefixIcon: const Icon(Icons.search),
@@ -503,16 +560,7 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
       ),
-      if (results.isEmpty)
-        const SliverFillRemaining(
-            hasScrollBody: false,
-            child: Center(child: Text('Tidak ada hasil. Coba kata kunci lain.')))
-      else
-        SliverList.builder(
-          itemCount: results.length,
-          itemBuilder: (_, i) => SongTile(results[i],
-              onTap: () => ctrl.playAt(kTracks.indexOf(results[i]), kTracks)),
-        ),
+      body,
     ]);
   }
 }
